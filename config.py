@@ -1,0 +1,9 @@
+OWNER_ID = 7896890222  # Owner Telegram user ID
+CHAT_LINK = "https://t.me/wiz_x_chk"  # Main chat group
+CHAT_ID = -1003222060363  # Chat group ID
+MAIN_CHANNEL = "https://t.me/wiz_x_chk"  # Main channel link
+OFFICIAL_GROUP_LINK = "https://t.me/wiz_x_chk"  # Official group link
+AUTHORIZED_PRIVATE_USERS = set()  # Start empty, or preload user IDs
+AUTHORIZED_CHATS = set((-1003222060363,))  # Authorized chat IDs
+ADMIN_IDS = [7896890222]  # Admin user IDs
+BOT_TOKEN = "8576235778:AAE5gGQR2GvMv98AokhVZ342VLWGBng9yWs"
