@@ -10181,6 +10181,14 @@ def main():
     application.add_handler(CallbackQueryHandler(dork_pagination, pattern=r"^dork_"))
     application.add_handler(CallbackQueryHandler(check_joined_callback, pattern="^check_joined$"))
     
+    
+    
+    # Generic handler for all /start menu buttons
+    application.add_handler(CallbackQueryHandler(handle_callback))
+
+    # Error handler
+    application.add_error_handler(error_handler)
+    
   
 
 
