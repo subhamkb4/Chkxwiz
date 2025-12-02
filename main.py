@@ -9309,12 +9309,21 @@ import platform
 import socket
 from datetime import datetime
 import time
+import threading
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 # Clickable bullet
 BULLET_LINK = '<a href="https://t.me/wiz_x_chk">[⊀]</a>'
+
+# Global variables for network speed calculation
+last_received = psutil.net_io_counters().bytes_recv
+last_sent = psutil.net_io_counters().bytes_sent
+last_total = last_received + last_sent
+last_time = time.time()
+upload_speed = 0
+download_speed = 0
 
 async def get_total_users():
     from db import get_all_users
@@ -9329,11 +9338,67 @@ def get_uptime() -> str:
     minutes, seconds = divmod(remainder, 60)
     return f"{days}d {hours:02}:{minutes:02}:{seconds:02}"
 
+def get_bot_uptime(start_time: float) -> str:
+    uptime_seconds = int(time.time() - start_time)
+    days, remainder = divmod(uptime_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{days}d {hours:02}h {minutes:02}m {seconds:02}s"
+
+def calculate_network_speed():
+    global last_received, last_sent, last_total, last_time, upload_speed, download_speed
+    
+    while True:
+        current_received = psutil.net_io_counters().bytes_recv
+        current_sent = psutil.net_io_counters().bytes_sent
+        current_total = current_received + current_sent
+        current_time = time.time()
+        
+        time_diff = current_time - last_time
+        if time_diff > 0:
+            download_speed = (current_received - last_received) / time_diff
+            upload_speed = (current_sent - last_sent) / time_diff
+        
+        last_received = current_received
+        last_sent = current_sent
+        last_total = current_total
+        last_time = current_time
+        
+        time.sleep(1)
+
+def format_speed(speed_bytes):
+    """Convert bytes per second to human readable format"""
+    if speed_bytes < 1024:
+        return f"{speed_bytes:.1f} B/s"
+    elif speed_bytes < 1024**2:
+        return f"{speed_bytes/1024:.1f} KB/s"
+    elif speed_bytes < 1024**3:
+        return f"{speed_bytes/(1024**2):.1f} MB/s"
+    else:
+        return f"{speed_bytes/(1024**3):.1f} GB/s"
+
+def create_progress_bar(percentage, width=15):
+    """Create a stylish progress bar"""
+    filled = int(round(width * percentage / 100))
+    empty = width - filled
+    bar = "█" * filled + "░" * empty
+    return f"[{bar}] {percentage:.1f}%"
+
+# Start network speed monitoring in background thread
+speed_thread = threading.Thread(target=calculate_network_speed, daemon=True)
+speed_thread.start()
+
+# Store bot start time for bot uptime calculation
+bot_start_time = time.time()
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # CPU info
     cpu_usage = psutil.cpu_percent(interval=1)
     cpu_count = psutil.cpu_count(logical=True)
     cpu_model = platform.processor() or "N/A"
+    
+    # CPU progress bar
+    cpu_bar = create_progress_bar(cpu_usage)
 
     # RAM info
     memory = psutil.virtual_memory()
@@ -9341,12 +9406,18 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used_memory = memory.used / (1024 ** 3)
     available_memory = memory.available / (1024 ** 3)
     memory_percent = memory.percent
+    
+    # RAM progress bar
+    ram_bar = create_progress_bar(memory_percent)
 
     # Swap info
     swap = psutil.swap_memory()
     total_swap = swap.total / (1024 ** 3)
     used_swap = swap.used / (1024 ** 3)
     swap_percent = swap.percent
+    
+    # Swap progress bar
+    swap_bar = create_progress_bar(swap_percent) if total_swap > 0 else "[No Swap]"
 
     # Disk info
     disk = psutil.disk_usage("/")
@@ -9354,6 +9425,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used_disk = disk.used / (1024 ** 3)
     free_disk = disk.free / (1024 ** 3)
     disk_percent = disk.percent
+    
+    # Disk progress bar
+    disk_bar = create_progress_bar(disk_percent)
 
     # Host/VPS info
     hostname = socket.gethostname()
@@ -9364,30 +9438,50 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Uptime
     uptime_str = get_uptime()
 
-    # Current time
+    # Bot uptime
+    bot_uptime_str = get_bot_uptime(bot_start_time)
+
+    # Current time and last updated time
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    last_updated = datetime.now().strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
 
     # Total users
     total_users = await get_total_users()
 
-    # Final message
+    # Network speed
+    upload_str = format_speed(upload_speed)
+    download_str = format_speed(download_speed)
+
+    # Final message with all features
     status_message = (
         f"✦━━━[ 𝐁𝐨𝐭 & 𝐕𝐏𝐒 𝐒𝐭𝐚𝐭𝐮𝐬 ]━━━✦\n"
         f"{BULLET_LINK} 𝐒𝐭𝐚𝐭𝐮𝐬 ➳ <code>Active ✅</code>\n"
         f"{BULLET_LINK} 𝐒𝐲𝐬𝐭𝐞𝐦 ➳ <code>{os_name} {os_version}</code>\n"
         f"{BULLET_LINK} 𝐀𝐫𝐜𝐡𝐢𝐭𝐞𝐜𝐭𝐮𝐫𝐞 ➳ <code>{architecture}</code>\n"
-        "――――――――――――――――\n"
+        f"{BULLET_LINK} 𝐇𝐨𝐬𝐭𝐧𝐚𝐦𝐞 ➳ <code>{hostname}</code>\n"
+        "――――――――――――――――――――――\n"
         f"{BULLET_LINK} 𝐂𝐏𝐔 ➳ <code>{cpu_usage:.1f}% ({cpu_count} cores)</code>\n"
-        f"{BULLET_LINK} 𝐑𝐀𝐌 ➳ <code>{used_memory:.2f}GB / {total_memory:.2f}GB ({memory_percent:.1f}%)</code>\n"
+        f"    📊 {cpu_bar}\n"
+        f"{BULLET_LINK} 𝐑𝐀𝐌 ➳ <code>{used_memory:.2f}GB / {total_memory:.2f}GB</code>\n"
+        f"    📊 {ram_bar}\n"
         f"{BULLET_LINK} 𝐑𝐀𝐌 𝐀𝐯𝐚𝐢𝐥𝐚𝐛𝐥𝐞 ➳ <code>{available_memory:.2f}GB</code>\n"
-        f"{BULLET_LINK} 𝐃𝐢𝐬𝐤 ➳ <code>{used_disk:.2f}GB / {total_disk:.2f}GB ({disk_percent:.1f}%)</code>\n"
+        f"{BULLET_LINK} 𝐒𝐰𝐚𝐩 ➳ <code>{used_swap:.2f}GB / {total_swap:.2f}GB</code>\n"
+        f"    📊 {swap_bar}\n"
+        f"{BULLET_LINK} 𝐃𝐢𝐬𝐤 ➳ <code>{used_disk:.2f}GB / {total_disk:.2f}GB</code>\n"
+        f"    📊 {disk_bar}\n"
         f"{BULLET_LINK} 𝐃𝐢𝐬𝐤 𝐀𝐯𝐚𝐢𝐥𝐚𝐛𝐥𝐞 ➳ <code>{free_disk:.2f}GB</code>\n"
-        "――――――――――――――――\n"
+        "――――――――――――――――――――――\n"
+        f"{BULLET_LINK} 𝐍𝐞𝐭𝐰𝐨𝐫𝐤 𝐒𝐩𝐞𝐞𝐝\n"
+        f"    ⬆️ 𝐔𝐩𝐥𝐨𝐚𝐝 ➳ <code>{upload_str}</code>\n"
+        f"    ⬇️ 𝐃𝐨𝐰𝐧𝐥𝐨𝐚𝐝 ➳ <code>{download_str}</code>\n"
+        "――――――――――――――――――――――\n"
         f"{BULLET_LINK} 𝐓𝐨𝐭𝐚𝐥 𝐔𝐬𝐞𝐫𝐬 ➳ <code>{total_users}</code>\n"
-        f"{BULLET_LINK} 𝐔𝐩𝐭𝐢𝐦𝐞 ➳ <code>{uptime_str}</code>\n"
-        f"{BULLET_LINK} 𝐓𝐢𝐦𝐞 ➳ <code>{current_time}</code>\n"
+        f"{BULLET_LINK} 𝐕𝐏𝐒 𝐔𝐩𝐭𝐢𝐦𝐞 ➳ <code>{uptime_str}</code>\n"
+        f"{BULLET_LINK} 𝐁𝐨𝐭 𝐔𝐩𝐭𝐢𝐦𝐞 ➳ <code>{bot_uptime_str}</code>\n"
+        f"{BULLET_LINK} 𝐂𝐮𝐫𝐫𝐞𝐧𝐭 𝐓𝐢𝐦𝐞 ➳ <code>{current_time}</code>\n"
+        f"{BULLET_LINK} 𝐋𝐚𝐬𝐭 𝐔𝐩𝐝𝐚𝐭𝐞𝐝 ➳ <code>{last_updated}</code>\n"
         f"{BULLET_LINK} 𝐁𝐨𝐭 𝐁𝐲 ➳ <a href='tg://resolve?domain=BLAZE_X_007'>𝘽 𝙇 𝘼 𝙕 𝙀</a>\n"
-        "――――――――――――――――"
+        "――――――――――――――――――――――"
     )
 
     await update.effective_message.reply_text(
